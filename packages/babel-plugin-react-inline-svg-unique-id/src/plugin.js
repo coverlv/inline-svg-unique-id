@@ -1,8 +1,9 @@
 import template from '@babel/template';
 import jsxSyntaxPlugin from '@babel/plugin-syntax-jsx';
 
-const idGeneratorLibraryName = '@inline-svg-unique-id/react';
-const idGeneratorHookName = 'useUniqueInlineId';
+const idGeneratorLibraryName = 'react';
+const idGeneratorHookName = 'useId';
+const idValueVariableName = '__useId';
 
 const idAttributeName = 'id';
 
@@ -67,9 +68,9 @@ const createIdValuesContainer = (createIdIdentifier) => {
   };
 };
 
-const buildIdExpression = template.expression('`#${%%idIdentifier%%}`');
-
-const buildIriUrlExpression = template.expression(`\`${createIriUrl('${%%idIdentifier%%}')}\``);
+const buildIdExpression = template.expression('`#${%%value%%}__${%%idIdentifier%%}`');
+const idReferenceExpression = template.expression('`${%%value%%}__${%%idIdentifier%%}`');
+const buildIriUrlExpression = template.expression(`\`${createIriUrl('${%%value%%}__${%%idIdentifier%%}')}\``);
 
 const buildIdGeneratorHookImportStatement = template(
   `import { ${idGeneratorHookName} } from '${idGeneratorLibraryName}';`,
@@ -87,7 +88,10 @@ const plugin = ({ types: t }) => {
               return stylesOrIdIdentifier;
             }
 
-            const iriUrlExpression = buildIriUrlExpression({ idIdentifier });
+            const iriUrlExpression = buildIriUrlExpression({
+              idIdentifier: idValueVariableName,
+              value: t.stringLiteral(idValue),
+            });
 
             return stylesOrIdIdentifier
               .split(createIriUrl(idValue))
@@ -115,7 +119,14 @@ const plugin = ({ types: t }) => {
     const idIdentifier = idValuesContainer.getIdIdentifier(idValueMatches[1]);
 
     if (idIdentifier) {
-      attribute.get('value').replaceWith(jsxAttributeValue(valueBuilder({ idIdentifier })));
+      attribute.get('value').replaceWith(
+        jsxAttributeValue(
+          valueBuilder({
+            idIdentifier: idValueVariableName,
+            value: t.stringLiteral(idValueMatches[1]),
+          }),
+        ),
+      );
     }
   };
 
@@ -129,7 +140,14 @@ const plugin = ({ types: t }) => {
 
       const newIdIdentifier = state.idValuesContainer.createIdIdentifier(idAttribute.node.value.value);
 
-      idAttribute.get('value').replaceWith(jsxAttributeValue(newIdIdentifier));
+      idAttribute.get('value').replaceWith(
+        jsxAttributeValue(
+          idReferenceExpression({
+            idIdentifier: idValueVariableName,
+            value: t.stringLiteral(idAttribute.node.value.value),
+          }),
+        ),
+      );
     },
   };
 
@@ -151,9 +169,11 @@ const plugin = ({ types: t }) => {
   const svgDefsVisitor = {
     JSXElement(path, state) {
       if (isDefsPath(path)) {
-        path.traverse(svgDefsElementsIdIdentifiersCreatorVisitor, state);
+        // path.traverse(svgDefsElementsIdIdentifiersCreatorVisitor, state);
         path.traverse(svgDefsElementsAttributesMapperVisitor, state);
       }
+      // all element's id should include useId()
+      path.traverse(svgDefsElementsIdIdentifiersCreatorVisitor, state);
     },
   };
 
@@ -234,9 +254,9 @@ const plugin = ({ types: t }) => {
 
       rootPath.unshiftContainer('body', buildIdGeneratorHookImportStatement());
 
-      idValuesContainer.getIdentifiers().forEach((idIdentifier) => {
-        body.unshiftContainer('body', buildIdIdentifierGeneratorStatement({ idIdentifier }));
-      });
+      if (idValuesContainer.getIdentifiers().length) {
+        body.unshiftContainer('body', buildIdIdentifierGeneratorStatement({ idIdentifier: idValueVariableName }));
+      }
     },
   };
 
